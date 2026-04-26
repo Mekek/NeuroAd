@@ -1,50 +1,140 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Emotion Test</title>
+  <title>Emotion Pro</title>
+
+  <!-- face-api -->
   <script src="https://unpkg.com/face-api.js@0.22.2/dist/face-api.min.js"></script>
+
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <style>
+    body { font-family: Arial; text-align: center; }
+    canvas { margin-top: 20px; }
+  </style>
 </head>
 <body>
 
-<h2>Emotion test</h2>
+<h2>Emotion Detection</h2>
+
 <video id="video" width="480" height="360" autoplay muted></video>
 <h3 id="emotion">Loading...</h3>
+
+<canvas id="chart" width="500" height="200"></canvas>
 
 <script>
 const video = document.getElementById('video');
 
+// === СГЛАЖИВАНИЕ ===
+const history = [];
+const HISTORY_SIZE = 5;
+
+function smooth(expressions) {
+  history.push(expressions);
+  if (history.length > HISTORY_SIZE) history.shift();
+
+  const avg = {};
+
+  history.forEach(e => {
+    for (let key in e) {
+      avg[key] = (avg[key] || 0) + e[key];
+    }
+  });
+
+  for (let key in avg) {
+    avg[key] /= history.length;
+  }
+
+  return avg;
+}
+
+// === ПОРОГ УВЕРЕННОСТИ ===
+function getTopEmotion(expressions) {
+  const entries = Object.entries(expressions);
+  entries.sort((a, b) => b[1] - a[1]);
+
+  if (!entries.length) return "uncertain";
+
+  if (entries[0][1] < 0.6) return "uncertain";
+
+  return entries[0][0];
+}
+
+// === CHART ===
+const labels = ["neutral","happy","sad","angry","fearful","disgusted","surprised"];
+
+const chart = new Chart(document.getElementById("chart"), {
+  type: "bar",
+  data: {
+    labels: labels,
+    datasets: [{
+      label: "Emotion probability",
+      data: [0,0,0,0,0,0,0]
+    }]
+  },
+  options: {
+    responsive: false,
+    animation: false, // 🔥 убираем лаги
+    scales: {
+      y: {
+        min: 0,
+        max: 1
+      }
+    }
+  }
+});
+
+// === КАМЕРА ===
 async function setupCamera() {
   const stream = await navigator.mediaDevices.getUserMedia({ video: true });
   video.srcObject = stream;
 }
 
+// === МОДЕЛИ ===
 async function loadModels() {
   const MODEL_URL = '/models';
 
-  await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
+  await faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL);
   await faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL);
 }
 
-function getTopEmotion(expressions) {
-  return Object.keys(expressions).reduce((a, b) =>
-    expressions[a] > expressions[b] ? a : b
-  );
-}
-
+// === MAIN LOOP ===
 async function start() {
   await setupCamera();
   await loadModels();
 
+  let lastTime = 0;
+
   setInterval(async () => {
+    const now = Date.now();
+    if (now - lastTime < 300) return;
+    lastTime = now;
+
     const result = await faceapi
-      .detectSingleFace(video, new faceapi.TinyFaceDetectorOptions())
+      .detectSingleFace(video, new faceapi.SsdMobilenetv1Options())
       .withFaceExpressions();
 
-    if (result) {
-      const emotion = getTopEmotion(result.expressions);
-      document.getElementById('emotion').innerText = emotion;
+    if (result && result.expressions) {
+
+      const smoothed = smooth(result.expressions);
+      const emotion = getTopEmotion(smoothed);
+
+      // === БЕЗОПАСНЫЙ ВЫВОД ===
+      if (emotion === "uncertain") {
+        document.getElementById('emotion').innerText = "uncertain";
+      } else {
+        const value = smoothed[emotion] ?? 0;
+        document.getElementById('emotion').innerText =
+          `${emotion} (${value.toFixed(2)})`;
+      }
+
+      // === ОБНОВЛЕНИЕ ГРАФИКА ===
+      chart.data.datasets[0].data = labels.map(l => smoothed[l] || 0);
+      chart.update();
     }
-  }, 500);
+
+  }, 100);
 }
 
 start();

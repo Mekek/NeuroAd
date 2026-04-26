@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Emotion AI</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+
+<h2>Emotion Detection</h2>
+
+<video id="video" width="480" height="360" autoplay muted></video>
+<h3 id="emotion">Loading...</h3>
+
+<canvas id="chart" width="600" height="250"></canvas>
+
+<script>
+const video = document.getElementById('video');
+let isProcessing = false;
+
+const labels = ["neutral","happy","sad","angry","fear","surprise","disgust"];
+
+const chart = new Chart(document.getElementById("chart"), {
+  type: "line",
+  data: {
+    labels: [],
+    datasets: labels.map(label => ({
+      label: label,
+      data: [],
+      fill: false
+    }))
+  },
+  options: {
+    animation: false,
+    responsive: false,
+    scales: {
+      y: { min: 0, max: 100 }
+    }
+  }
+});
+
+async function setupCamera() {
+  const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+  video.srcObject = stream;
+}
+
+function captureFrame() {
+  const canvas = document.createElement('canvas');
+
+  const w = 224;
+  const h = 224;
+
+  canvas.width = w;
+  canvas.height = h;
+
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(video, 0, 0, w, h);
+
+  return canvas.toDataURL('image/jpeg', 0.7);
+}
+
+function updateChart(data) {
+  const t = new Date().toLocaleTimeString();
+
+  chart.data.labels.push(t);
+
+  labels.forEach((l, i) => {
+    chart.data.datasets[i].data.push(data[l] || 0);
+  });
+
+  if (chart.data.labels.length > 20) {
+    chart.data.labels.shift();
+    chart.data.datasets.forEach(d => d.data.shift());
+  }
+
+  chart.update();
+}
+
+async function loop() {
+  if (isProcessing) return;
+  isProcessing = true;
+
+  try {
+    const image = captureFrame();
+
+    const res = await fetch("http://localhost:8000/analyze", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ image })
+    });
+
+    const data = await res.json();
+
+    console.log(data.all); // 👈 теперь увидишь эмоции
+
+    if (data.emotion) {
+      document.getElementById("emotion").innerText =
+        `${data.emotion} (${data.confidence.toFixed(1)})`;
+
+      updateChart(data.all);
+    }
+
+  } catch (e) {
+    console.log(e);
+  }
+
+  isProcessing = false;
+
+  setTimeout(loop, 300);
+}
+
+async function start() {
+  await setupCamera();
+  loop();
+}
+
+start();
+</script>
+
+</body>
+</html>
