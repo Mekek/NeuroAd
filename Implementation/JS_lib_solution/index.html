@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Emotion Test</title>
+  <script src="https://unpkg.com/face-api.js@0.22.2/dist/face-api.min.js"></script>
+</head>
+<body>
+
+<h2>Emotion test</h2>
+<video id="video" width="480" height="360" autoplay muted></video>
+<h3 id="emotion">Loading...</h3>
+
+<script>
+const video = document.getElementById('video');
+
+async function setupCamera() {
+  const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+  video.srcObject = stream;
+}
+
+async function loadModels() {
+  const MODEL_URL = '/models';
+
+  await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
+  await faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL);
+}
+
+function getTopEmotion(expressions) {
+  return Object.keys(expressions).reduce((a, b) =>
+    expressions[a] > expressions[b] ? a : b
+  );
+}
+
+async function start() {
+  await setupCamera();
+  await loadModels();
+
+  setInterval(async () => {
+    const result = await faceapi
+      .detectSingleFace(video, new faceapi.TinyFaceDetectorOptions())
+      .withFaceExpressions();
+
+    if (result) {
+      const emotion = getTopEmotion(result.expressions);
+      document.getElementById('emotion').innerText = emotion;
+    }
+  }, 500);
+}
+
+start();
+</script>
+
+</body>
+</html>
